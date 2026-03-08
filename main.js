@@ -31,13 +31,19 @@ const STORAGE_KEY = "tamgu_study_data";
 
 // 초기 상태
 let state = {
-    activeUnits: {}, // unitId: { startDate, completedSteps: [] }
+    activeUnits: {}, // unitId: { startDate, completedSteps: [], completionDates: {} }
     roundCount: 0
 };
 
 // 앱 초기화
 function init() {
     loadData();
+    // 데이터 마이그레이션: completionDates가 없는 경우 빈 객체로 초기화
+    for (const unitId in state.activeUnits) {
+        if (!state.activeUnits[unitId].completionDates) {
+            state.activeUnits[unitId].completionDates = {};
+        }
+    }
     renderAll();
 }
 
@@ -56,6 +62,7 @@ function saveData() {
 
 // 날짜 차이 계산 (YYYY-MM-DD 기준)
 function getDiffInDays(startDateStr) {
+    if (!startDateStr) return 0;
     const start = new Date(startDateStr);
     start.setHours(0, 0, 0, 0);
     const today = new Date();
@@ -81,12 +88,41 @@ function renderTodoList() {
     for (const unitId in state.activeUnits) {
         const unitData = state.activeUnits[unitId];
         const [subjectName, unitName] = unitId.split("||");
-        const currentDay = getDiffInDays(unitData.startDate);
         
         // 각 단계별로 오늘 해야 할 일인지 확인
         REVIEW_INTERVALS.forEach((targetDay, index) => {
-            // 오늘이 목표일보다 같거나 지났고, 아직 완료하지 않은 단계라면 표시
-            if (currentDay >= targetDay && !unitData.completedSteps.includes(index)) {
+            // 이미 완료한 단계라면 스킵
+            if (unitData.completedSteps.includes(index)) return;
+
+            let isAvailable = false;
+            
+            if (index === 0) {
+                // 1단계(1일차)는 시작하면 즉시 노출
+                isAvailable = true;
+            } else {
+                // 그 외 단계는 이전 단계가 완료되었고, 지정된 기간이 지났는지 확인
+                const prevIndex = index - 1;
+                if (unitData.completedSteps.includes(prevIndex)) {
+                    const prevCompletionDate = unitData.completionDates[prevIndex];
+                    if (prevCompletionDate) {
+                        const diffSincePrev = getDiffInDays(prevCompletionDate);
+                        const requiredInterval = REVIEW_INTERVALS[index] - REVIEW_INTERVALS[prevIndex];
+                        // diffSincePrev가 1이면 당일, 2이면 다음날, 3이면 다다음날(이틀 후)
+                        if (diffSincePrev >= requiredInterval + 1) {
+                            isAvailable = true;
+                        }
+                    } else {
+                        // 레거시 데이터 대응: 이전 단계 완료일이 없으면 시작일 기준으로 계산 (혹은 보수적으로 노출 안함)
+                        // 여기서는 시작일 기준으로 기존 로직과 유사하게 동작하도록 함
+                        const currentDay = getDiffInDays(unitData.startDate);
+                        if (currentDay >= targetDay) {
+                            isAvailable = true;
+                        }
+                    }
+                }
+            }
+
+            if (isAvailable) {
                 hasTasks = true;
                 const item = document.createElement("div");
                 item.className = "todo-item";
@@ -155,7 +191,8 @@ window.startUnit = (unitId) => {
     const today = new Date().toISOString().split('T')[0];
     state.activeUnits[unitId] = {
         startDate: today,
-        completedSteps: []
+        completedSteps: [],
+        completionDates: {}
     };
     saveData();
     renderAll();
@@ -163,7 +200,12 @@ window.startUnit = (unitId) => {
 
 window.toggleComplete = (unitId, stepIndex) => {
     if (!state.activeUnits[unitId].completedSteps.includes(stepIndex)) {
+        const today = new Date().toISOString().split('T')[0];
         state.activeUnits[unitId].completedSteps.push(stepIndex);
+        if (!state.activeUnits[unitId].completionDates) {
+            state.activeUnits[unitId].completionDates = {};
+        }
+        state.activeUnits[unitId].completionDates[stepIndex] = today;
         saveData();
         
         // 애니메이션 효과를 위해 약간의 지연 후 렌더링
