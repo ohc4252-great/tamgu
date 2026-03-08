@@ -67,13 +67,8 @@ function getDiffInDays(startDateStr) {
 
 // 렌더링 함수들
 function renderAll() {
-    renderRoundCount();
     renderTodoList();
     renderSubjects();
-}
-
-function renderRoundCount() {
-    document.getElementById("round-num").textContent = state.roundCount;
 }
 
 function renderTodoList() {
